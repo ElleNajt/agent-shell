@@ -4071,6 +4071,10 @@ Returns the path to the transcript file, or nil if disabled."
            nil filepath nil 'no-message)
           (message "Created %s"
                    (agent-shell--shorten-paths filepath t))
+          (let ((map-file (expand-file-name "~/.agent-shell/transcripts/map.csv")))
+            (make-directory (file-name-directory map-file) t)
+            (write-region (format "%s,%s,%s\n" (format-time-string "%F %T") (agent-shell-cwd) filepath)
+                          nil map-file t 'no-message))
           filepath)
       (error
        (message "Failed to initialize transcript: %S" err)
