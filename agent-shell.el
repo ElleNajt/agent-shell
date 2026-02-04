@@ -1926,6 +1926,9 @@ variable (see makunbound)"))
       (setq-local agent-shell--shell-maker-config shell-maker-config)
       (agent-shell--update-header-and-mode-line)
       (add-hook 'kill-buffer-hook #'agent-shell--clean-up nil t)
+      ;; Mark as "real" buffer for Doom Emacs so it's not filtered from buffer switching
+      (when (boundp 'doom-real-buffer-p)
+        (setq-local doom-real-buffer-p t))
       (agent-shell-ui-mode +1)
       (when agent-shell-file-completion-enabled
         (agent-shell-completion-mode +1))
