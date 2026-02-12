@@ -2822,16 +2822,17 @@ variable (see makunbound)"))
                                       :heartbeat (agent-shell-heartbeat-make
                                                   :on-heartbeat
                                                   (lambda (_heartbeat _status)
-                                                    (when (get-buffer-window shell-buffer)
-                                                      (with-current-buffer shell-buffer
-                                                        (agent-shell--update-header-and-mode-line)))
-                                                    (when-let* ((using-viewports agent-shell-prefer-viewport-interaction)
-                                                                (viewport-buffer (agent-shell-viewport--buffer
-                                                                                  :shell-buffer shell-buffer
-                                                                                  :existing-only t))
-                                                                ((get-buffer-window viewport-buffer)))
-                                                      (with-current-buffer viewport-buffer
-                                                        (agent-shell-viewport--update-header)))))
+                                                    (when agent-shell-show-busy-indicator
+                                                      (when (get-buffer-window shell-buffer)
+                                                        (with-current-buffer shell-buffer
+                                                          (agent-shell--update-header-and-mode-line)))
+                                                      (when-let* ((using-viewports agent-shell-prefer-viewport-interaction)
+                                                                  (viewport-buffer (agent-shell-viewport--buffer
+                                                                                    :shell-buffer shell-buffer
+                                                                                    :existing-only t))
+                                                                  ((get-buffer-window viewport-buffer)))
+                                                        (with-current-buffer viewport-buffer
+                                                          (agent-shell-viewport--update-header))))))
                                       :client-maker (map-elt config :client-maker)
                                       :needs-authentication (map-elt config :needs-authentication)
                                       :authenticate-request-maker (map-elt config :authenticate-request-maker)
