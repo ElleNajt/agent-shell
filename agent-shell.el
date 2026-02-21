@@ -3508,7 +3508,7 @@ Falls back to latest session in batch mode (e.g. tests)."
                 (agent-shell--display-buffer other-shell)
                 (kill-buffer bootstrapping-shell)
                 :other-shell)
-            (map-elt session-choices selection)))))))
+            (map-elt session-choices selection))))))
 
 
 (cl-defun agent-shell--set-session-from-response (&key acp-response acp-session-id)
