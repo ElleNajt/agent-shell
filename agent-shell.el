@@ -216,10 +216,15 @@ passed through to `acp-make-client'.
 If `agent-shell-container-command-runner' is set, the command will be
 wrapped with the runner prefix."
   (let* ((full-command (append (list command) command-params))
-         (wrapped-command (agent-shell--build-command-for-execution full-command)))
+         (wrapped-command (agent-shell--build-command-for-execution full-command))
+         (buf-name (when context-buffer (buffer-name context-buffer)))
+         (env (if buf-name
+                  (cons (format "ACP_MULTIPLEX_NAME=%s" buf-name)
+                        environment-variables)
+                environment-variables)))
     (acp-make-client :command (car wrapped-command)
                      :command-params (cdr wrapped-command)
-                     :environment-variables environment-variables
+                     :environment-variables env
                      :context-buffer context-buffer
                      :outgoing-request-decorator (when context-buffer
                                                    (map-elt (buffer-local-value 'agent-shell--state context-buffer)
@@ -279,8 +284,8 @@ Can be one of:
  \='text: Display simple text-only header.
  nil: Display no header."
   :type '(choice (const :tag "Graphical" graphical)
-                 (const :tag "Text only" text)
-                 (const :tag "No header" nil))
+          (const :tag "Text only" text)
+          (const :tag "No header" nil))
   :group 'agent-shell)
 
 (defcustom agent-shell-show-welcome-message t
@@ -299,10 +304,10 @@ Can be a symbol selecting a predefined style, or a list of frame strings.
 When providing custom frames, do not include leading spaces as padding
 is added automatically."
   :type '(choice (const :tag "Wave (pulses up and down)" wave)
-                 (const :tag "Dots Block (circular spin)" dots-block)
-                 (const :tag "Dots Round (circular spin)" dots-round)
-                 (const :tag "Wide (horizontal blocks)" wide)
-                 (repeat :tag "Custom frames" string))
+          (const :tag "Dots Block (circular spin)" dots-block)
+          (const :tag "Dots Round (circular spin)" dots-round)
+          (const :tag "Wide (horizontal blocks)" wide)
+          (repeat :tag "Custom frames" string))
   :group 'agent-shell)
 
 (defcustom agent-shell-screenshot-command
@@ -354,8 +359,8 @@ Each element can be:
 - Kebab case: For example \='claude-code-agent @ my-project\='
 - A function: Called with agent name and project name."
   :type '(choice (const :tag "Default" default)
-                 (const :tag "Kebab case" kebab-case)
-                 (function :tag "Custom format"))
+          (const :tag "Kebab case" kebab-case)
+          (function :tag "Custom format"))
   :group 'agent-shell)
 
 ;;;###autoload
@@ -473,9 +478,9 @@ Available values:
   `latest': Always load/resume the latest session.
   `prompt': Always prompt to choose a session (or start a new one)."
   :type '(choice (const :tag "New session, deferred init" new-deferred)
-                 (const :tag "Always start new session" new)
-                 (const :tag "Load latest session" latest)
-                 (const :tag "Prompt for session" prompt))
+          (const :tag "Always start new session" new)
+          (const :tag "Load latest session" latest)
+          (const :tag "Prompt for session" prompt))
   :group 'agent-shell)
 
 (defun agent-shell--resolve-preferred-config ()
@@ -2171,16 +2176,16 @@ PROPERTIES should be a plist of property-value pairs."
 (defun agent-shell--format-buffer-name (agent-name project-name)
   "Format `agent-shell' buffer name using AGENT-NAME and PROJECT-NAME."
   (pcase agent-shell-buffer-name-format
-        ((pred functionp)
-         (funcall agent-shell-buffer-name-format agent-name project-name))
-        ('kebab-case
-         (format "%s-agent @ %s"
-                 (downcase (replace-regexp-in-string " " "-" agent-name))
-                 project-name))
-        ('default
-         (format "%s Agent @ %s"
-                 agent-name
-                 project-name))))
+    ((pred functionp)
+     (funcall agent-shell-buffer-name-format agent-name project-name))
+    ('kebab-case
+     (format "%s-agent @ %s"
+             (downcase (replace-regexp-in-string " " "-" agent-name))
+             project-name))
+    ('default
+     (format "%s Agent @ %s"
+             agent-name
+             project-name))))
 
 (cl-defun agent-shell--apply (&key function alist)
   "Apply keyword ALIST to FUNCTION.
@@ -3656,8 +3661,8 @@ Falls back to latest session in batch mode (e.g. tests)."
                                 :request (let ((cwd (agent-shell--resolve-path (agent-shell-cwd)))
                                                (mcp-servers (agent-shell--mcp-servers)))
                                            (let ((use-resume (if agent-shell-prefer-session-resume
-                                                                  (map-elt (agent-shell--state) :supports-session-resume)
-                                                                (not (map-elt (agent-shell--state) :supports-session-load)))))
+                                                                 (map-elt (agent-shell--state) :supports-session-resume)
+                                                               (not (map-elt (agent-shell--state) :supports-session-load)))))
                                              (if use-resume
                                                  (acp-make-session-resume-request
                                                   :session-id acp-session-id
@@ -5551,7 +5556,7 @@ Mark model using CURRENT-MODEL-ID."
 Called with no arguments, should return a string path or nil to disable.
 When nil, transcript saving is disabled."
   :type '(choice (const :tag "Disabled" nil)
-                 (function :tag "Custom function"))
+          (function :tag "Custom function"))
   :group 'agent-shell)
 
 (defun agent-shell--default-transcript-file-path ()
