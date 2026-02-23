@@ -1408,6 +1408,33 @@ COMMAND, when present, may be a shell command string or an argv vector."
                (agent-shell--update-header-and-mode-line)
                ;; Note: This is session-level state, no need to set :last-entry-type
                nil)
+              ((equal (map-elt update 'sessionUpdate) "turn_complete")
+               ;; Synthesized by acp-multiplex for secondary frontends
+               ;; that don't receive the session/prompt response directly.
+               (when (equal (map-elt state :last-entry-type) "agent_message_chunk")
+                 (agent-shell--append-transcript
+                  :text "\n\n"
+                  :file-path agent-shell--transcript-file))
+               (map-put! state :tool-calls nil)
+               (let ((success (equal (map-elt update 'stopReason) "end_turn")))
+                 (unless success
+                   (agent-shell--update-fragment
+                    :state state
+                    :block-id (format "%s-stop-reason"
+                                      (map-elt state :request-count))
+                    :body (agent-shell--stop-reason-description
+                           (map-elt update 'stopReason))
+                    :create-new t))
+                 (agent-shell-heartbeat-stop
+                  :heartbeat (map-elt state :heartbeat))
+                 (shell-maker-finish-output :config shell-maker--config
+                                            :success t)
+                 (when-let ((viewport-buffer (agent-shell-viewport--buffer
+                                              :shell-buffer (map-elt state :buffer)
+                                              :existing-only t)))
+                   (with-current-buffer viewport-buffer
+                     (agent-shell-viewport--update-header))))
+               (map-put! state :last-entry-type nil))
               (t
                (agent-shell--update-fragment
                 :state state
@@ -3551,7 +3578,7 @@ Falls back to latest session in batch mode (e.g. tests)."
                 (agent-shell--display-buffer other-shell)
                 (kill-buffer bootstrapping-shell)
                 :other-shell)
-            (map-elt session-choices selection))))))
+            (map-elt session-choices selection)))))))
 
 
 (cl-defun agent-shell--set-session-from-response (&key acp-response acp-session-id)
