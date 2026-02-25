@@ -599,6 +599,8 @@ OUTGOING-REQUEST-DECORATOR (passed through to `acp-make-client')."
         (cons :supports-session-list nil)
         (cons :supports-session-load nil)
         (cons :supports-session-resume nil)
+        (cons :supports-session-fork nil)
+        (cons :fork-session-id nil)
         (cons :prompt-capabilities nil)
         (cons :event-subscriptions nil)
         (cons :pending-requests nil)
@@ -767,6 +769,25 @@ Always prompts for agent selection, even if existing shells are available."
   (agent-shell '(4)))
 
 ;;;###autoload
+(defun agent-shell-fork-session ()
+  "Fork the current agent-shell session into a new buffer.
+
+Creates a new independent session that inherits the conversation
+context of the current one.  Requires agent support for
+session.fork capability."
+  (interactive)
+  (unless (derived-mode-p 'agent-shell-mode)
+    (user-error "Not in an agent-shell buffer"))
+  (let ((session-id (map-nested-elt agent-shell--state '(:session :id)))
+        (config (map-elt agent-shell--state :agent-config)))
+    (unless session-id
+      (user-error "No active session to fork"))
+    (unless config
+      (user-error "No agent config found"))
+    (agent-shell-start :config config
+                       :fork-session-id session-id)))
+
+;;;###autoload
 (defun agent-shell-prompt-compose ()
   "Compose an `agent-shell' prompt in a dedicated buffer.
 
@@ -782,17 +803,21 @@ If currently visiting an `agent-shell', transfer latest input."
         (agent-shell-viewport--show-buffer :override input))
     (agent-shell-viewport--show-buffer)))
 
-(cl-defun agent-shell-start (&key config outgoing-request-decorator)
+(cl-defun agent-shell-start (&key config outgoing-request-decorator fork-session-id)
   "Programmatically start shell with CONFIG.
 
 See `agent-shell-make-agent-config' for config format.
 
 OUTGOING-REQUEST-DECORATOR is an optional function passed through to
-`acp-make-client'.  See its docstring for details."
+`acp-make-client'.  See its docstring for details.
+
+FORK-SESSION-ID, when non-nil, forks the session with that ID into a new
+independent session (requires agent support for session.fork capability)."
   (agent-shell--start :config config
                       :no-focus nil
                       :new-session t
-                      :outgoing-request-decorator outgoing-request-decorator))
+                      :outgoing-request-decorator outgoing-request-decorator
+                      :fork-session-id fork-session-id))
 
 (cl-defun agent-shell--config-icon (&key config)
   "Create icon string for CONFIG if available and icons are enabled.
@@ -2201,7 +2226,7 @@ FUNCTION should be a function accepting keyword arguments (&key ...)."
                    (list (car pair) (cdr pair)))
                  alist)))
 
-(cl-defun agent-shell--start (&key config no-focus new-session session-strategy outgoing-request-decorator)
+(cl-defun agent-shell--start (&key config no-focus new-session session-strategy outgoing-request-decorator fork-session-id)
   "Programmatically start shell with CONFIG.
 
 See `agent-shell-make-agent-config' for config format.
@@ -2209,7 +2234,8 @@ See `agent-shell-make-agent-config' for config format.
 Set NO-FOCUS to start in background.
 Set NEW-SESSION to start a separate new session.
 SESSION-STRATEGY overrides `agent-shell-session-strategy' buffer-locally.
-OUTGOING-REQUEST-DECORATOR is passed through to `acp-make-client'."
+OUTGOING-REQUEST-DECORATOR is passed through to `acp-make-client'.
+FORK-SESSION-ID, when non-nil, forks that session into a new one."
   (unless (version<= "0.85.1" shell-maker-version)
     (error "Please update shell-maker to version 0.85.1 or newer"))
   (unless (version<= "0.11.1" acp-package-version)
@@ -2270,6 +2296,8 @@ variable (see makunbound)"))
                                       :authenticate-request-maker (map-elt config :authenticate-request-maker)
                                       :outgoing-request-decorator outgoing-request-decorator
                                       :agent-config config))
+      (when fork-session-id
+        (map-put! agent-shell--state :fork-session-id fork-session-id))
       ;; Initialize buffer-local shell-maker-config
       (setq-local agent-shell--shell-maker-config shell-maker-config)
       (setq-local filter-buffer-substring-function #'agent-shell--filter-buffer-substring)
@@ -2303,7 +2331,8 @@ variable (see makunbound)"))
          :config shell-maker--config
          :output (funcall (map-elt config :welcome-function)
                           shell-maker--config)))
-      (if (eq agent-shell-session-strategy 'new-deferred)
+      (if (and (eq agent-shell-session-strategy 'new-deferred)
+               (not fork-session-id))
           ;; Show prompt now (unbootstrapped).
           (shell-maker-finish-output
            :config shell-maker--config
@@ -3244,6 +3273,10 @@ Must provide ON-INITIATED (lambda ())."
                      (map-put! agent-shell--state :supports-session-resume
                                (and (listp acp-session-capabilities)
                                     (assq 'resume acp-session-capabilities)
+                                    t))
+                     (map-put! agent-shell--state :supports-session-fork
+                               (and (listp acp-session-capabilities)
+                                    (assq 'fork acp-session-capabilities)
                                     t)))
                    ;; Save prompt capabilities from agent, converting to internal symbols
                    (when-let ((prompt-capabilities
@@ -3380,18 +3413,28 @@ Must provide ON-SESSION-INIT (lambda ())."
      :block-id "starting"
      :body "\n\nCreating session..."
      :append t))
-  (if (and (map-elt (agent-shell--state) :supports-session-list)
-           (or (map-elt (agent-shell--state) :supports-session-load)
-               (map-elt (agent-shell--state) :supports-session-resume))
-           (not (memq agent-shell-session-strategy '(new-deferred new))))
-      (agent-shell--initiate-session-list-and-load
-       :shell-buffer shell-buffer
-       :on-session-init on-session-init)
-    (progn
-      (agent-shell--emit-event :event 'session-selected)
-      (agent-shell--initiate-new-session
-       :shell-buffer shell-buffer
-       :on-session-init on-session-init))))
+  (cond
+   ;; Fork an existing session into a new independent one.
+   ((map-elt (agent-shell--state) :fork-session-id)
+    (if (map-elt (agent-shell--state) :supports-session-fork)
+        (agent-shell--initiate-fork-session
+         :shell-buffer shell-buffer
+         :on-session-init on-session-init)
+      (error "Agent does not support session forking")))
+   ;; List existing sessions and load/resume one.
+   ((and (map-elt (agent-shell--state) :supports-session-list)
+         (or (map-elt (agent-shell--state) :supports-session-load)
+             (map-elt (agent-shell--state) :supports-session-resume))
+         (not (memq agent-shell-session-strategy '(new-deferred new))))
+    (agent-shell--initiate-session-list-and-load
+     :shell-buffer shell-buffer
+     :on-session-init on-session-init))
+   ;; Start a fresh session.
+   (t
+    (agent-shell--emit-event :event 'session-selected)
+    (agent-shell--initiate-new-session
+     :shell-buffer shell-buffer
+     :on-session-init on-session-init))))
 
 (defun agent-shell--format-session-date (iso-timestamp)
   "Format ISO-TIMESTAMP as a human-friendly date string.
@@ -3559,6 +3602,52 @@ Falls back to latest session in batch mode (e.g. tests)."
   (agent-shell--update-header-and-mode-line)
   (agent-shell--emit-event :event 'init-session)
   (funcall on-session-init))
+
+(cl-defun agent-shell--initiate-fork-session (&key shell-buffer on-session-init)
+  "Fork an existing session into a new independent one.
+
+Uses the session ID stored in `:fork-session-id' state.
+The forked session gets a new ID from the agent (read from the response),
+while inheriting the conversation context of the original."
+  (let ((fork-id (map-elt (agent-shell--state) :fork-session-id)))
+    (agent-shell--update-fragment
+     :state (agent-shell--state)
+     :namespace-id "bootstrapping"
+     :block-id "starting"
+     :body (format "\n\nForking session %s..." fork-id)
+     :append t)
+    (acp-send-request
+     :client (map-elt (agent-shell--state) :client)
+     :request (acp-make-session-fork-request
+               :session-id fork-id
+               :cwd (agent-shell--resolve-path (agent-shell-cwd))
+               :mcp-servers (agent-shell--mcp-servers))
+     :buffer (current-buffer)
+     :on-success (lambda (response)
+                   ;; Fork returns a NEW session ID — use it, not the old fork-id.
+                   (agent-shell--set-session-from-response
+                    :acp-response response
+                    :acp-session-id (map-elt response 'sessionId))
+                   (agent-shell--update-fragment
+                    :state (agent-shell--state)
+                    :namespace-id "bootstrapping"
+                    :block-id "forked_session"
+                    :label-left (format "%s %s"
+                                        (agent-shell--status-label "completed")
+                                        (propertize "Forked session" 'font-lock-face 'font-lock-doc-markup-face))
+                    :expanded t
+                    :body (format "Forked from %s" fork-id))
+                   (agent-shell--finalize-session-init :on-session-init on-session-init))
+     :on-failure (lambda (_error _raw-message)
+                   (agent-shell--update-fragment
+                    :state (agent-shell--state)
+                    :namespace-id "bootstrapping"
+                    :block-id "starting"
+                    :body "\n\nCould not fork session. Creating a new one..."
+                    :append t)
+                   (agent-shell--initiate-new-session
+                    :shell-buffer shell-buffer
+                    :on-session-init on-session-init)))))
 
 (cl-defun agent-shell--initiate-new-session (&key shell-buffer on-session-init)
   "Initiate ACP session/new with SHELL-BUFFER and ON-SESSION-INIT."
