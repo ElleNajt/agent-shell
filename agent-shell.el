@@ -286,10 +286,15 @@ Sources are checked in order until one returns non-nil."
 COMMAND, COMMAND-PARAMS, ENVIRONMENT-VARIABLES, and CONTEXT-BUFFER are
 passed through to `acp-make-client'."
   (let* ((full-command (append (list command) command-params))
-         (wrapped-command (agent-shell--build-command-for-execution full-command)))
+         (wrapped-command (agent-shell--build-command-for-execution full-command))
+         (buf-name (when context-buffer (buffer-name context-buffer)))
+         (env (if buf-name
+                  (cons (format "ACP_MULTIPLEX_NAME=%s" buf-name)
+                        environment-variables)
+                environment-variables)))
     (acp-make-client :command (car wrapped-command)
                      :command-params (cdr wrapped-command)
-                     :environment-variables environment-variables
+                     :environment-variables env
                      :context-buffer context-buffer
                      :outgoing-request-decorator (when context-buffer
                                                    (map-elt (buffer-local-value 'agent-shell--state context-buffer)
